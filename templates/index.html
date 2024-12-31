@@ -4,16 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Image Prediction</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="/static/styles.css">
 </head>
 <body>
     <div class="container">
-        <h1>Image Prediction</h1>
-        <form id="uploadForm" enctype="multipart/form-data">
+        <h1>Fish Species Prediction</h1>
+        <form id="uploadForm" enctype="multipart/form-data" method="POST" action="/predict">
             <label for="fileInput">Upload an image:</label>
             <input type="file" id="fileInput" name="file" accept="image/*">
             <button type="submit">Predict</button>
-        </form>
+        </form>        
         <div id="result" class="result"></div>
     </div>
 

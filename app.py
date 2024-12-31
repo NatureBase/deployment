@@ -4,6 +4,12 @@ from PIL import Image
 import torch
 import torch.nn as nn
 from transformers import ViTModel
+import requests
+import os
+import torch.serialization
+import pickle
+import gdown
+
 
 # Define SpeciesSpecificAttention class
 class SpeciesSpecificAttention(nn.Module):
@@ -56,20 +62,68 @@ class ViTWithSSA(nn.Module):
         x = self.classifier(x)  # Final classification
         return x
 
-# Load model and processor
+torch.serialization.add_safe_globals({
+    'OrderedDict': torch.nn.Module
+})
+
+# Download checkpoint from Google Drive if not exists
+# https://drive.google.com/file/d/1OgxWPmw4mvbmr76Y4OA1kwwP4Nt4rbyo/view?usp=sharing
+# checkpoint_url = "https://drive.google.com/uc?id=1OgxWPmw4mvbmr76Y4OA1kwwP4Nt4rbyo&export=download"
+# checkpoint_path = "checkpoint.pth"
+
+file_id = "1OgxWPmw4mvbmr76Y4OA1kwwP4Nt4rbyo"
+output_path = "checkpoint.pth"
+gdown.download(f"https://drive.google.com/uc?id={file_id}", output_path, quiet=False)
+
+# Now you can load the model state
 model = ViTWithSSA(num_classes=9)  # Replace with your actual class count
-checkpoint_path = "/path/to/checkpoint.pth"
-model.load_state_dict(torch.load(checkpoint_path, map_location="cpu")['model_state_dict'])
+
+# Define a custom pickle module with proper handling for encoding
+class CustomPickleModule:
+    @staticmethod
+    def load(file, **kwargs):
+        # Use the custom Unpickler explicitly to handle the encoding
+        return CustomPickleModule.Unpickler(file, **kwargs).load()
+
+    class Unpickler(pickle.Unpickler):
+        def __init__(self, file, *args, **kwargs):
+            kwargs.pop("encoding", None)  # Remove unsupported encoding argument
+            super().__init__(file, *args, **kwargs)
+
+        def find_class(self, module, name):
+            # Optionally customize or restrict class loading here
+            return super().find_class(module, name)
+
+# Load the checkpoint using the custom pickle module
+with open("checkpoint.pth", "rb") as f:
+    checkpoint = torch.load(f, map_location="cpu", encoding='latin1', pickle_module=CustomPickleModule)
+
+
+# model.load_state_dict(torch.load(checkpoint_path, map_location="cpu")['model_state_dict'])
+# checkpoint = torch.load(destination, map_location="cpu", pickle_module=pickle)
+model.load_state_dict(checkpoint)
 model.eval()
 
+
+
 image_processor = AutoImageProcessor.from_pretrained("google/vit-base-patch16-224-in21k")
-label_mapping = {0: "Sea Bass", 1: "Trout", 2: "Horse Mackerel"}  # Add your actual mappings
+label_mapping = label_mapping = {
+    0: "Sea Bass",
+    1: "Trout",
+    2: "Horse Mackerel",
+    3: "Shrimp",
+    4: "Gilt-Head Bream",
+    5: "Red Sea Bream",
+    6: "Striped Red Mullet",
+    7: "Red Mullet",
+    8: "Black Sea Sprat"
+}  # Add your actual mappings
 
 app = Flask(__name__, template_folder='.')
 
 @app.route('/')
 def index():
-    return render_template('index.html')
+    return render_template('templates/index.html')
 
 @app.route('/predict', methods=['POST'])
 def predict():
@@ -77,16 +131,24 @@ def predict():
         return jsonify({'error': 'No file provided'}), 400
     file = request.files['file']
     try:
-        # Process image
+        # Process the file
         image = Image.open(file).convert("RGB")
         pixel_values = image_processor(image, return_tensors="pt")['pixel_values']
         with torch.no_grad():
             outputs = model(pixel_values)
             _, predicted_class = torch.max(outputs, dim=1)
-        label = label_mapping[predicted_class.item()]
+            print(f"Predicted class index: {predicted_class.item()}")
+
+            # Ensure valid mapping
+            label = label_mapping.get(predicted_class.item(), "Unknown Class")
+            print(f"Predicted label: {label}")
+
         return jsonify({'prediction': label}), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
+        print(f"Error: {e}")
         return jsonify({'error': str(e)}), 500
 
 if __name__ == "__main__":
-    app.run(host='0.0.0.0', port=5000)
+    app.run(debug=True, host='0.0.0.0', port=5000)
